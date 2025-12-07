@@ -1,0 +1,105 @@
+---
+title: "XGBoost Model"
+author: "Audrey Garcia"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r}
+library(tidyverse)
+library(mlr3verse)
+```
+
+```{r}
+# Save Rmd in a folder that also includes the ucla-stats-101-c-fall-2025-regression folder 
+amazon_purchases <- read_csv("ucla-stats-101-c-fall-2025-regression/amazon-purchases.csv")
+fields <- read_csv("ucla-stats-101-c-fall-2025-regression/fields.csv")
+survey_train_test <- read_csv("ucla-stats-101-c-fall-2025-regression/survey_train_test.csv")
+```
+
+```{r}
+# Problem description says:
+# "removed all information from the test data that wouldn't be known at sign-up (you only have ResponseID, Gender, and state)"
+# but he didn't...
+# so I did here
+
+
+survey <- survey_train_test |>
+  select(Survey.ResponseID, Q.demos.gender, Q.demos.state, Q.amazon.use.hh.size.num, test) |>
+  mutate(Q.demos.gender = as.factor(Q.demos.gender)) |> 
+  mutate(Q.demos.state = as.factor(Q.demos.state)) |>
+  rename(Gender = Q.demos.gender, State = Q.demos.state)
+```
+
+```{r}
+amazon <- amazon_purchases |>
+  rename(Survey.ResponseID = `Survey ResponseID`)
+fulldata <- left_join(amazon, survey, by = "Survey.ResponseID")
+```
+
+```{r}
+fulldata <- fulldata |> 
+  mutate(Day = day(`Order Date`), Month = month(`Order Date`), Year = year(`Order Date`)) |>
+  select(-`Order Date`, -Title, -`ASIN/ISBN (Product Code)`, -`Shipping Address State`)
+
+pivoted <- fulldata |>
+  group_by(Survey.ResponseID, Category) |>
+  summarize(Count = sum(Quantity)) |> 
+  pivot_wider(names_from = Category, values_from = Count, values_fill = 0)
+
+joined <- pivoted |>
+  left_join(survey, by = "Survey.ResponseID")
+```
+
+```{r}
+xg_task <- as_task_regr(joined, target = "Q.amazon.use.hh.size.num")
+set.seed(12) # for group 12 :)
+
+lrn_xgboost <- as_learner(
+  ppl("robustify") %>>%
+  lrn("regr.xgboost",
+    eta = to_tune(1e-4, 1, logscale = TRUE),
+    max_depth = to_tune(1, 10),
+    colsample_bytree = to_tune(1e-1, 1),
+    colsample_bylevel = to_tune(1e-1, 1),
+    lambda = to_tune(1e-3, 1e3, logscale = TRUE),
+    alpha = to_tune(1e-3, 1e3, logscale = TRUE),
+    subsample = to_tune(1e-1, 1)
+))
+
+at_xgb = auto_tuner( 
+  tuner = tnr("random_search"),
+  term_evals = 700, 
+  learner = lrn_xgboost, 
+  resampling = rsmp("holdout"), ### "holdout"
+  measure = msr("regr.rmse")
+)
+
+```
+
+```{r}
+# Hyperparameter tuning
+at_xgb$train(xg_task , row_ids = which(joined$test == FALSE))
+```
+```{r}
+best_xgb <- at_xgb$learner$clone(deep = TRUE)
+```
+
+```{r}
+best_xgb$train(xg_task , row_ids = which(joined$test == FALSE))
+```
+
+```{r}
+prediction <- best_xgb$predict(xg_task, row_ids = which(joined$test == TRUE))
+```
+
+```{r}
+submission <- cbind(joined$Survey.ResponseID[which(joined$test == TRUE)], prediction$response) |>
+  as.data.frame()
+names(submission) <- c("Survey.ResponseID", "Q.amazon.use.hh.size.num")
+```
+
+```{r}
+write_csv(submission, "submission.csv")
+```
+
