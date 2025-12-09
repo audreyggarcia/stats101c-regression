@@ -3,6 +3,7 @@ title: "XGBoost Model"
 author: "Audrey Garcia"
 date: "`r Sys.Date()`"
 output: pdf_document
+always_allow_html: true
 ---
 
 ```{r}
@@ -141,13 +142,36 @@ at_xgb = auto_tuner(
 
 ```{r}
 # Hyperparameter tuning
-at_xgb$train(xg_task , row_ids = which(joined$test == FALSE))
+# commented out for quicker run time
+# HOWEVER, to achieve exact results as submitted, proceed using the complete hypertuning process
+# (roundoff errors)
+
+# at_xgb$train(xg_task , row_ids = which(joined$test == FALSE))
+# best_xgb <- at_xgb$learner$clone(deep = TRUE)
 ```
 
 ```{r}
-best_xgb <- at_xgb$learner$clone(deep = TRUE)
+# best_xgb <- at_xgb$learner$clone(deep = TRUE)
 
-best_xgb$model$regr.xgboost$param_vals
+# tuned_hyperparams <- best_xgb$model$regr.xgboost$param_vals
+
+
+best_xgb <- as_learner(
+  ppl("robustify") %>>%
+  lrn("regr.xgboost")
+)
+best_xgb$pipeops_param_set_values$regr.xgboost = list(
+      alpha = 0.0585235,
+      colsample_bylevel = 0.3437478,
+      colsample_bytree = 0.9904165,
+      eta = (0.003094458),
+      lambda = (0.0179533),
+      max_depth = 8,
+      nrounds = 1000,
+      nthread = 1,
+      subsample = 0.40495
+)
+
 
 ```
 
@@ -204,8 +228,10 @@ write_csv(submission, "submission.csv")
 
 ```{r}
 # Plot one tree of xgb model
+# commented out for pdf knitting
+
 library(xgboost)
-xgboost::xgb.plot.tree(model = best_xgb$model$regr.xgboost$model, trees = 1)
+# xgboost::xgb.plot.tree(model = best_xgb$model$regr.xgboost$model, trees = 1)
 ```
 
 
